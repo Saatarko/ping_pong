@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Ping-Pong Game</title>
+    <link rel="stylesheet" href="static/main.css">
+     <div id="ajax-popup" class="popup" style="display: none;">
+        <p id="ajax-popup-message"></p>
+        <button id="close-ajax-popup">Закрыть</button>
+    </div>
+</head>
+<body>
+    <div id="gameControls">
+        <button id="createGameButton">Создать игру</button>
+        <input type="text" id="gameKey" placeholder="Введите ключ игры">
+        <button id="joinGame">Присоединиться к игре</button>
+    </div>
+    <div class="container">
+        <button id="startButton">Начать игру</button>
+        <div class="scoreboard">
+            <h2 class="Auth_title">Счет матча</h2>
+            <span id="scorePlayer1">Игрок 1(желтый): 0</span>
+            <span id="scorePlayer2">Игрок 2(красный): 0</span>
+
+        </div>
+        <canvas id="gameCanvas" width="800" height="600"></canvas>
+    </div>
+
+    <script src="static/game.js"></script>
+<script>
+
+        document.getElementById('joinGame').addEventListener('click', () => {
+            const gameKey = document.getElementById('gameKey').value;
+            if (gameKey) {
+                const ws = new WebSocket(`ws://localhost:8000/ws/${gameKey}`);
+                // Здесь можно добавить дополнительные обработчики для WebSocket
+            }
+        });
+    </script>
+</body>
+</html>
