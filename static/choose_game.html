@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Choose Game</title>
+    <style>
+        body { font-family: Arial, sans-serif; }
+        .container { width: 300px; margin: auto; padding-top: 50px; }
+        label { display: block; margin-bottom: 10px; }
+        input[type="checkbox"] { margin-right: 10px; }
+        select, button { display: block; margin-top: 20px; width: 100%; }
+        .status { margin-top: 20px; }
+        .status button { width: auto; margin-left: 10px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Choose Game</h2>
+        <form id="game-form">
+            <label>
+                <input type="checkbox" id="player1-checkbox">
+                Player 1
+                <button type="button" id="player1-ready-button">Ready</button>
+            </label>
+            <label>
+                <input type="checkbox" id="player2-checkbox">
+                Player 2
+                <button type="button" id="player2-ready-button">Ready</button>
+            </label>
+            <label>
+                Room:
+                <select id="room-select">
+                    <option value="room1">Room 1</option>
+                    <option value="room2">Room 2</option>
+                    <option value="room3">Room 3</option>
+                </select>
+            </label>
+            <button type="button" id="change-room-button">Change Room</button>
+            <button type="button" id="start-game-button">Start Game</button>
+        </form>
+        <div id="error-message" style="color: red;"></div>
+        <div class="status">
+            <p><strong>Player 1 Selected:</strong> <span id="player1-status">No</span></p>
+            <p><strong>Player 2 Selected:</strong> <span id="player2-status">No</span></p>
+        </div>
+    </div>
+    <script>
+        const wsUrl = 'ws://localhost:8000/ws/';
+        let currentRoom = 'room1';
+        let ws;
+
+        // Initialize WebSocket connection when the page loads
+        window.onload = () => {
+            connectWebSocket();
+        };
+
+        document.getElementById('change-room-button').addEventListener('click', () => {
+            currentRoom = document.getElementById('room-select').value;
+            connectWebSocket();
+        });
+
+        document.getElementById('player1-ready-button').addEventListener('click', () => {
+            const player1Checked = document.getElementById('player1-checkbox').checked;
+            sendPlayerStatus('player1', player1Checked);
+        });
+
+        document.getElementById('player2-ready-button').addEventListener('click', () => {
+            const player2Checked = document.getElementById('player2-checkbox').checked;
+            sendPlayerStatus('player2', player2Checked);
+        });
+
+        document.getElementById('start-game-button').addEventListener('click', () => {
+        if (ws) {
+            const player1Ready = document.getElementById('player1-status').innerText === 'Yes';
+            const player2Ready = document.getElementById('player2-status').innerText === 'Yes';
+
+            if (player1Ready && player2Ready) {
+                ws.send(JSON.stringify({
+                    type: 'start_game',
+                    room: currentRoom
+                }));
+            } else {
+                showError('Both players must be ready.');
+            }
+        }
+    });
+        function connectWebSocket() {
+                if (ws) {
+                    ws.close();
+                }
+
+                ws = new WebSocket(wsUrl + currentRoom);
+
+                ws.onopen = () => {
+                    console.log('Connected to room:', currentRoom);
+                };
+
+                ws.onmessage = (event) => {
+                    const message = JSON.parse(event.data);
+                    console.log('Received:', message);
+
+                    if (message.type === 'update_players') {
+                        updatePlayerStatus(message.players);
+                    }
+
+                    if (message.type === 'game_started') {
+                        // Redirect to the game page for both clients
+                        window.location.href = '/static/game.html?room=' + currentRoom;
+                    }
+                };
+          }
+
+        function sendPlayerStatus(player, isReady) {
+            if (ws) {
+                ws.send(JSON.stringify({
+                    type: 'player_status',
+                    room: currentRoom,
+                    player: player,
+                    isReady: isReady
+                }));
+            }
+        }
+
+        function updatePlayerStatus(players) {
+            document.getElementById('player1-status').innerText = players.player1 ? 'Yes' : 'No';
+            document.getElementById('player2-status').innerText = players.player2 ? 'Yes' : 'No';
+        }
+
+        function showError(message) {
+            document.getElementById('error-message').innerText = message;
+        }
+    </script>
+</body>
+</html>

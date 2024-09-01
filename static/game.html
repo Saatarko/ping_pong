@@ -2,40 +2,62 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Ping-Pong Game</title>
-    <link rel="stylesheet" href="static/main.css">
-     <div id="ajax-popup" class="popup" style="display: none;">
-        <p id="ajax-popup-message"></p>
-        <button id="close-ajax-popup">Закрыть</button>
-    </div>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Game</title>
+    <style>
+        body { font-family: Arial, sans-serif; }
+        canvas { border: 1px solid black; display: block; margin: auto; }
+    </style>
 </head>
 <body>
-    <div id="gameControls">
-        <button id="createGameButton">Создать игру</button>
-        <input type="text" id="gameKey" placeholder="Введите ключ игры">
-        <button id="joinGame">Присоединиться к игре</button>
-    </div>
-    <div class="container">
-        <button id="startButton">Начать игру</button>
-        <div class="scoreboard">
-            <h2 class="Auth_title">Счет матча</h2>
-            <span id="scorePlayer1">Игрок 1(желтый): 0</span>
-            <span id="scorePlayer2">Игрок 2(красный): 0</span>
+    <h2>Game</h2>
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const urlParams = new URLSearchParams(window.location.search);
+        const room = urlParams.get('room');
+        const wsUrl = 'ws://localhost:8000/ws/';
+        let ws;
 
-        </div>
-        <canvas id="gameCanvas" width="800" height="600"></canvas>
-    </div>
+        window.onload = () => {
+            connectWebSocket();
+        };
 
-    <script src="static/game.js"></script>
-<script>
+        function connectWebSocket() {
+            ws = new WebSocket(wsUrl + room);
 
-        document.getElementById('joinGame').addEventListener('click', () => {
-            const gameKey = document.getElementById('gameKey').value;
-            if (gameKey) {
-                const ws = new WebSocket(`ws://localhost:8000/ws/${gameKey}`);
-                // Здесь можно добавить дополнительные обработчики для WebSocket
-            }
-        });
+            ws.onopen = () => {
+                console.log('Connected to room:', room);
+            };
+
+            ws.onmessage = (event) => {
+                const message = JSON.parse(event.data);
+                console.log('Received:', message);
+
+                if (message.type === 'game_state') {
+                    updateGameState(message);
+                }
+            };
+        }
+
+        function updateGameState(state) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw ball
+            ctx.beginPath();
+            ctx.arc(state.ball.x, state.ball.y, state.ball.radius, 0, Math.PI * 2);
+            ctx.fillStyle = 'black';
+            ctx.fill();
+            ctx.closePath();
+
+            // Draw players
+            ctx.fillStyle = 'blue';
+            ctx.fillRect(state.player1.x, state.player1.y, state.player1.width, state.player1.height);
+
+            ctx.fillStyle = 'red';
+            ctx.fillRect(state.player2.x, state.player2.y, state.player2.width, state.player2.height);
+        }
     </script>
 </body>
 </html>

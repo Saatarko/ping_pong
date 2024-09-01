@@ -1,0 +1,147 @@
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+import json
+import asyncio
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse
+from typing import Dict
+
+app = FastAPI()
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Хранилище для состояния игроков и игр
+games: Dict[str, Dict[int, WebSocket]] = {}
+game_states: Dict[str, Dict] = {}
+
+
+@app.get("/")
+async def get():
+    return HTMLResponse(open("static/choose_game.html", encoding="utf-8").read())
+
+
+@app.websocket("/ws/{game_key}")
+async def websocket_endpoint(websocket: WebSocket, game_key: str):
+    print(f"WebSocket connection attempt for room: {game_key}")
+
+    if game_key not in games:
+        games[game_key] = {}
+        game_states[game_key] = {
+            'game_running': False,
+            'player1': {'x': 350, 'y': 10, 'width': 100, 'height': 20},
+            'player2': {'x': 350, 'y': 570, 'width': 100, 'height': 20},
+            'ball': {'x': 350, 'y': 250, 'radius': 10, 'dx': 2, 'dy': -2},
+            'scorePlayer1': 0,
+            'scorePlayer2': 0,
+            'player_ids': set()
+        }
+        print(f"Created new game room: {game_key}")
+
+    await websocket.accept()
+    print(f"WebSocket connection accepted for room: {game_key}")
+
+    player_id = None
+    if len(games[game_key]) == 0:
+        player_id = 1
+    elif len(games[game_key]) == 1:
+        player_id = 2
+    else:
+        print(f"Room {game_key} already has two players. Closing connection.")
+        await websocket.close()
+        return
+
+    games[game_key][player_id] = websocket
+    game_states[game_key]['player_ids'].add(player_id)
+    print(f"Player {player_id} connected to room {game_key}")
+
+    await websocket.send_json({'type': 'playerId', 'playerId': player_id})
+
+    try:
+        while True:
+            data = await websocket.receive_text()
+            message = json.loads(data)
+            print(f"Received message from player {player_id}: {message}")
+
+            if message['type'] == 'start_game':
+                if len(message['players']) == 2 and all(message['players'].values()):
+                    if not game_states[game_key]['game_running']:
+                        game_states[game_key]['game_running'] = True
+                        await broadcast_message(game_key, {'type': 'game_started'})
+                        await asyncio.create_task(game_loop(game_key))
+                else:
+                    await websocket.send_json(
+                        {'type': 'error', 'message': 'Both players must be selected to start the game.'})
+
+            players_status = {
+                'player1': 1 in game_states[game_key]['player_ids'],
+                'player2': 2 in game_states[game_key]['player_ids']
+            }
+            await broadcast_message(game_key, {'type': 'update_players', 'players': players_status})
+
+    except WebSocketDisconnect:
+        if player_id:
+            del games[game_key][player_id]
+            game_states[game_key]['player_ids'].remove(player_id)
+        if not games[game_key]:
+            del games[game_key]
+            del game_states[game_key]
+        print(f"Player {player_id} disconnected from room {game_key}")
+
+
+async def broadcast_message(game_key: str, message: dict):
+    if game_key in games:
+        for player_ws in games[game_key].values():
+            await player_ws.send_json(message)
+
+
+async def game_loop(game_key: str):
+    while game_key in games:
+        game_state = game_states[game_key]
+        if not game_state['game_running']:
+            await asyncio.sleep(0.016)
+            continue
+
+        ball = game_state['ball']
+        player1 = game_state['player1']
+        player2 = game_state['player2']
+
+        ball['x'] += ball['dx']
+        ball['y'] += ball['dy']
+
+        if ball['x'] <= 0 or ball['x'] >= 800:
+            ball['dx'] = -ball['dx']
+
+        if ball['y'] <= 0:
+            game_state['scorePlayer2'] += 1
+            reset_ball(game_key)
+        elif ball['y'] >= 600:
+            game_state['scorePlayer1'] += 1
+            reset_ball(game_key)
+
+        if player1['y'] < ball['y'] < player1['y'] + player1['height'] and player1['x'] < ball['x'] < player1['x'] + \
+                player1['width']:
+            ball['dy'] = -ball['dy']
+
+        if player2['y'] < ball['y'] < player2['y'] + player2['height'] and player2['x'] < ball['x'] < player2['x'] + \
+                player2['width']:
+            ball['dy'] = -ball['dy']
+
+        await broadcast_message(game_key, {
+            'type': 'game_state',
+            'ball': game_state['ball'],
+            'player1': game_state['player1'],
+            'player2': game_state['player2'],
+            'scorePlayer1': game_state['scorePlayer1'],
+            'scorePlayer2': game_state['scorePlayer2']
+        })
+        await asyncio.sleep(0.016)
+
+
+def reset_ball(game_key: str):
+    if game_key in game_states:
+        game_state = game_states[game_key]
+        ball = game_state['ball']
+        ball['x'] = 400
+        ball['y'] = 300
+        ball['dx'] = 2 if ball['dx'] > 0 else -2
+        ball['dy'] = -2 if ball['dy'] > 0 else 2
+        game_state['game_running'] = True
