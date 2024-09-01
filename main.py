@@ -114,11 +114,21 @@ async def websocket_endpoint(websocket: WebSocket, room: str):
 
 
 async def broadcast_message(room: str, message: dict):
+    websockets_to_remove = []
     for ws in rooms[room]['websockets']:
-        try:
-            await ws.send_text(json.dumps(message))
-        except Exception as e:
-            print(f"Failed to send message to client in room {room}: {e}")
+        if ws.client_state == WebSocketState.CONNECTED:
+            try:
+                await ws.send_text(json.dumps(message))
+            except Exception as e:
+                print(f"Failed to send message to client in room {room}: {e}")
+                websockets_to_remove.append(ws)
+        else:
+            websockets_to_remove.append(ws)
+
+    # Удаление отключенных веб-сокетов
+    for ws in websockets_to_remove:
+        rooms[room]['websockets'].remove(ws)
+
 
 async def update_game_state(room: str):
     game_state = rooms[room]['game_state']
@@ -171,7 +181,7 @@ async def game_loop(room: str):
     try:
         while room in rooms and rooms[room]['game_started']:
             await update_game_state(room)
-            await asyncio.sleep(0.016)  # 60 кадров в секунду
+            await asyncio.sleep(0.033)   # 60 кадров в секунду
     except Exception as e:
         print(f"Error in game loop for room {room}: {e}")
     finally:
@@ -183,6 +193,9 @@ async def game_loop(room: str):
 async def get_game_html():
     return HTMLResponse(open('static/game.html', 'r').read())
 
+import uvicorn
 
 if __name__ == "__main__":
-    uvicorn.run(app)
+    config = uvicorn.Config(app, host="127.0.0.1", port=8000, log_level="info", ws_ping_interval=20, ws_ping_timeout=30)
+    server = uvicorn.Server(config)
+    server.run()
