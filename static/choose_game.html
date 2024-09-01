@@ -71,7 +71,7 @@
         });
 
         document.getElementById('start-game-button').addEventListener('click', () => {
-            if (ws) {
+            if (ws && ws.readyState === WebSocket.OPEN) { // Проверка, что WebSocket-соединение открыто
                 const player1Ready = document.getElementById('player1-status').innerText === 'Yes';
                 const player2Ready = document.getElementById('player2-status').innerText === 'Yes';
 
@@ -83,6 +83,8 @@
                 } else {
                     showError('Both players must be ready.');
                 }
+            } else {
+                showError('WebSocket connection is not open.');
             }
         });
 
