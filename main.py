@@ -1,18 +1,17 @@
+import asyncio
 import uvicorn
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 import json
-from starlette.websockets import WebSocketDisconnect, WebSocketState, WebSocket
-import asyncio
 
+
+from starlette.websockets import WebSocketState, WebSocket
 
 app = FastAPI()
-
-
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Constants
+# Constants and initial state
 BALL_RADIUS = 10
 PADDLE_WIDTH = 100
 PADDLE_HEIGHT = 20
@@ -28,6 +27,7 @@ initial_game_state = {
 }
 
 rooms = {}
+
 
 @app.get("/")
 async def get():
@@ -45,7 +45,8 @@ async def websocket_endpoint(websocket: WebSocket, room: str):
             'websockets': [],
             'player_info': {},
             'game_state': initial_game_state.copy(),
-            'game_started': False
+            'game_started': False,
+            'game_loop_task': None
         }
 
     rooms[room]['websockets'].append(websocket)
@@ -85,9 +86,11 @@ async def websocket_endpoint(websocket: WebSocket, room: str):
                     rooms[room]['game_started'] = True
                     await broadcast_message(room, {'type': 'game_started'})
                     print(f"Game started in room {room}")
-                    await asyncio.create_task(game_loop(room))
-                else:
-                    await broadcast_message(room, {'type': 'waiting_for_players'})
+
+                    # Запускаем игровой цикл в фоновом режиме
+                    if rooms[room]['game_loop_task'] is not None:
+                        rooms[room]['game_loop_task'].cancel()
+                    rooms[room]['game_loop_task'] = asyncio.create_task(run_game_loop(room))
 
             elif message['type'] == 'player_update':
                 player = message['player']
@@ -98,19 +101,11 @@ async def websocket_endpoint(websocket: WebSocket, room: str):
                     **rooms[room]['game_state']
                 })
 
-    except WebSocketDisconnect as e:
-        print(f"WebSocket disconnected for room {room}: {e.code}")
     except Exception as e:
-        print(f"WebSocket error in room {room}: {e}")
-    finally:
-        if room in rooms and websocket in rooms[room]['websockets']:
-            rooms[room]['websockets'].remove(websocket)
-            print(f"WebSocket removed from room {room}")
+        print(f"Exception in websocket handling: {e}")
 
-            # Clean up the room if no more websockets are left
-            if not rooms[room]['websockets']:
-                del rooms[room]
-                print(f"Room {room} deleted")
+    finally:
+        remove_websocket(room, websocket)
 
 
 async def broadcast_message(room: str, message: dict):
@@ -125,63 +120,34 @@ async def broadcast_message(room: str, message: dict):
         else:
             websockets_to_remove.append(ws)
 
-    # Удаление отключенных веб-сокетов
     for ws in websockets_to_remove:
+        remove_websocket(room, ws)
+
+
+def remove_websocket(room: str, ws: WebSocket):
+    if room in rooms and ws in rooms[room]['websockets']:
         rooms[room]['websockets'].remove(ws)
+        print(f"WebSocket removed from room {room}")
+        if not rooms[room]['websockets']:
+            if rooms[room]['game_loop_task'] is not None:
+                rooms[room]['game_loop_task'].cancel()
+            del rooms[room]
+            print(f"Room {room} deleted")
 
 
-async def update_game_state(room: str):
-    game_state = rooms[room]['game_state']
-    ball = game_state['ball']
-    player1 = game_state['player1']
-    player2 = game_state['player2']
-
-    # Update ball position
-    ball['x'] += ball['dx']
-    ball['y'] += ball['dy']
-
-    # Print ball position for debugging
-    print(f"Ball position: x={ball['x']}, y={ball['y']}")
-
-    # Reflect off left and right walls
-    if ball['x'] - ball['radius'] <= 0 or ball['x'] + ball['radius'] >= canvas_width:
-        ball['dx'] = -ball['dx']
-
-    # Reflect off player 1's paddle or give point to player 2
-    if ball['y'] - ball['radius'] <= player1['y'] + player1['height']:
-        if player1['x'] <= ball['x'] <= player1['x'] + player1['width']:
-            # Ball hits player 1's paddle
-            ball['dy'] = -ball['dy']
-        else:
-            # Player 2 scores if ball misses player 1's paddle
-            game_state['scores']['player2'] += 1
-            # Reset ball to the center
-            ball.update({'x': canvas_width // 2, 'y': canvas_height // 2, 'dx': BALL_SPEED, 'dy': BALL_SPEED})
-
-    # Reflect off player 2's paddle or give point to player 1
-    if ball['y'] + ball['radius'] >= player2['y']:
-        if player2['x'] <= ball['x'] <= player2['x'] + player2['width']:
-            # Ball hits player 2's paddle
-            ball['dy'] = -ball['dy']
-        else:
-            # Player 1 scores if ball misses player 2's paddle
-            game_state['scores']['player1'] += 1
-            # Reset ball to the center
-            ball.update({'x': canvas_width // 2, 'y': canvas_height // 2, 'dx': BALL_SPEED, 'dy': BALL_SPEED})
-
-    print(f"Updated game state: {game_state}")
-
-    # Broadcast updated game state to all players in the room
-    await broadcast_message(room, {'type': 'game_state', **game_state})
-
-
-
-async def game_loop(room: str):
+async def run_game_loop(room: str):
     print(f"Starting game loop for room: {room}")
     try:
         while room in rooms and rooms[room]['game_started']:
-            await update_game_state(room)
-            await asyncio.sleep(0.033)   # 60 кадров в секунду
+            try:
+                update_game_state(room)
+                # Отправляем обновленное состояние всем подключенным WebSocket
+                await broadcast_message(room, rooms[room]['game_state'])
+            except Exception as e:
+                print(f"Error in update_game_state for room {room}: {e}")
+                break
+            await asyncio.sleep(1)  # Обновляем раз в 1 секунду
+
     except Exception as e:
         print(f"Error in game loop for room {room}: {e}")
     finally:
@@ -189,11 +155,52 @@ async def game_loop(room: str):
             rooms[room]['game_started'] = False
         print(f"Game loop for room {room} ended")
 
+
+def update_game_state(room: str):
+    game_state = rooms[room]['game_state']
+    ball = game_state['ball']
+    player1 = game_state['player1']
+    player2 = game_state['player2']
+
+    print(f"Updating game state: {game_state}")
+
+    ball['x'] += ball['dx']
+    ball['y'] += ball['dy']
+
+    if ball['x'] - ball['radius'] <= 0 or ball['x'] + ball['radius'] >= canvas_width:
+        ball['dx'] = -ball['dx']
+
+    if ball['y'] - ball['radius'] <= 0:
+        game_state['scores']['player2'] += 1
+        ball.update({'x': canvas_width // 2, 'y': canvas_height // 2, 'dx': BALL_SPEED, 'dy': BALL_SPEED})
+
+    if ball['y'] + ball['radius'] >= canvas_height:
+        game_state['scores']['player1'] += 1
+        ball.update({'x': canvas_width // 2, 'y': canvas_height // 2, 'dx': BALL_SPEED, 'dy': BALL_SPEED})
+
+    if ball['y'] <= player1['y'] + player1['height']:
+        if player1['x'] <= ball['x'] <= player1['x'] + player1['width']:
+            ball['y'] = player1['y'] + player1['height'] + ball['radius']
+            ball['dy'] = -ball['dy']
+        else:
+            game_state['scores']['player2'] += 1
+            ball.update({'x': canvas_width // 2, 'y': canvas_height // 2, 'dx': BALL_SPEED, 'dy': BALL_SPEED})
+
+    if ball['y'] + ball['radius'] >= player2['y']:
+        if player2['x'] <= ball['x'] <= player2['x'] + player2['width']:
+            ball['y'] = player2['y'] - ball['radius']
+            ball['dy'] = -ball['dy']
+        else:
+            game_state['scores']['player1'] += 1
+            ball.update({'x': canvas_width // 2, 'y': canvas_height // 2, 'dx': BALL_SPEED, 'dy': BALL_SPEED})
+
+    print(f"Updated game state: {game_state}")
+
+
 @app.get("/game.html")
 async def get_game_html():
     return HTMLResponse(open('static/game.html', 'r').read())
 
-import uvicorn
 
 if __name__ == "__main__":
     config = uvicorn.Config(app, host="127.0.0.1", port=8000, log_level="info", ws_ping_interval=20, ws_ping_timeout=30)
