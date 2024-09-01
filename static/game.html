@@ -19,6 +19,14 @@
         const room = urlParams.get('room');
         const wsUrl = 'ws://localhost:8000/ws/';
         let ws;
+        const paddleWidth = 100;
+        const paddleHeight = 20;
+
+        let player = null; // Will be assigned 'player1' or 'player2'
+        const paddles = {
+            player1: { x: canvas.width / 2 - paddleWidth / 2, y: 10, width: paddleWidth, height: paddleHeight },
+            player2: { x: canvas.width / 2 - paddleWidth / 2, y: canvas.height - paddleHeight - 10, width: paddleWidth, height: paddleHeight }
+        };
 
         window.onload = () => {
             connectWebSocket();
@@ -29,6 +37,7 @@
 
             ws.onopen = () => {
                 console.log('Connected to room:', room);
+                identifyPlayer();  // Попробуйте добавить идентификацию игрока здесь
             };
 
             ws.onmessage = (event) => {
@@ -37,27 +46,102 @@
 
                 if (message.type === 'game_state') {
                     updateGameState(message);
+                } else if (message.type === 'identify_player') {
+                    player = message.player;  // Устанавливаем игрока
+                    console.log('Player identified as:', player);
                 }
             };
         }
 
         function updateGameState(state) {
+                console.log('Update game state:', state);
+
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                // Draw ball
+                if (state.ball) {
+                    ctx.beginPath();
+                    ctx.arc(state.ball.x, state.ball.y, state.ball.radius, 0, Math.PI * 2);
+                    ctx.fillStyle = 'black';
+                    ctx.fill();
+                    ctx.closePath();
+                }
+
+                // Draw paddles
+                if (state.player1) {
+                    ctx.fillStyle = 'blue';
+                    ctx.fillRect(state.player1.x, state.player1.y, state.player1.width, state.player1.height);
+                }
+
+                if (state.player2) {
+                    ctx.fillStyle = 'red';
+                    ctx.fillRect(state.player2.x, state.player2.y, state.player2.width, state.player2.height);
+                }
+            }
+
+
+        function draw() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            // Draw ball
-            ctx.beginPath();
-            ctx.arc(state.ball.x, state.ball.y, state.ball.radius, 0, Math.PI * 2);
-            ctx.fillStyle = 'black';
-            ctx.fill();
-            ctx.closePath();
-
-            // Draw players
             ctx.fillStyle = 'blue';
-            ctx.fillRect(state.player1.x, state.player1.y, state.player1.width, state.player1.height);
+            ctx.fillRect(paddles.player1.x, paddles.player1.y, paddles.player1.width, paddles.player1.height);
 
             ctx.fillStyle = 'red';
-            ctx.fillRect(state.player2.x, state.player2.y, state.player2.width, state.player2.height);
+            ctx.fillRect(paddles.player2.x, paddles.player2.y, paddles.player2.width, paddles.player2.height);
         }
+
+       function sendPlayerUpdate(player, position) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'player_update', player: player, position: position }));
+            }
+        }
+
+        // Отправить идентификацию игрока
+        function identifyPlayer() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'identify_player' }));
+                console.log('Sent identify_player message');
+            }
+        }
+
+        // Обработка нажатий клавиш для перемещения ракеток
+        document.addEventListener('keydown', (event) => {
+                console.log('Key pressed:', event.key);  // Проверяем, что событие запускается
+
+                if (!player) {
+                    console.log('Player is not set');
+                    return;
+                }
+
+                if (event.key === 'ArrowLeft') {
+                    if (player === 'player1') {
+                        console.log('Player1 ArrowLeft');
+                        paddles.player1.x = Math.max(paddles.player1.x - 10, 0);
+                        sendPlayerUpdate('player1', paddles.player1);
+                    } else if (player === 'player2') {
+                        console.log('Player2 ArrowLeft');
+                        paddles.player2.x = Math.max(paddles.player2.x - 10, 0);
+                        sendPlayerUpdate('player2', paddles.player2);
+                    }
+                } else if (event.key === 'ArrowRight') {
+                    if (player === 'player1') {
+                        console.log('Player1 ArrowRight');
+                        paddles.player1.x = Math.min(paddles.player1.x + 10, canvas.width - paddleWidth);
+                        sendPlayerUpdate('player1', paddles.player1);
+                    } else if (player === 'player2') {
+                        console.log('Player2 ArrowRight');
+                        paddles.player2.x = Math.min(paddles.player2.x + 10, canvas.width - paddleWidth);
+                        sendPlayerUpdate('player2', paddles.player2);
+                    }
+                }
+                draw();
+            });
+
+        // Идентификация игрока при загрузке страницы
+        window.onload = () => {
+            connectWebSocket();
+            identifyPlayer();
+        };
     </script>
 </body>
 </html>

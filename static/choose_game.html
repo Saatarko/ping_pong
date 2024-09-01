@@ -71,45 +71,47 @@
         });
 
         document.getElementById('start-game-button').addEventListener('click', () => {
-        if (ws) {
-            const player1Ready = document.getElementById('player1-status').innerText === 'Yes';
-            const player2Ready = document.getElementById('player2-status').innerText === 'Yes';
+            if (ws) {
+                const player1Ready = document.getElementById('player1-status').innerText === 'Yes';
+                const player2Ready = document.getElementById('player2-status').innerText === 'Yes';
 
-            if (player1Ready && player2Ready) {
-                ws.send(JSON.stringify({
-                    type: 'start_game',
-                    room: currentRoom
-                }));
-            } else {
-                showError('Both players must be ready.');
+                if (player1Ready && player2Ready) {
+                    ws.send(JSON.stringify({
+                        type: 'start_game',
+                        room: currentRoom
+                    }));
+                } else {
+                    showError('Both players must be ready.');
+                }
             }
-        }
-    });
+        });
+
         function connectWebSocket() {
-                if (ws) {
-                    ws.close();
+            if (ws) {
+                ws.close();
+            }
+
+            ws = new WebSocket(wsUrl + currentRoom);
+
+            ws.onopen = () => {
+                console.log('Connected to room:', currentRoom);
+                identifyPlayer();
+            };
+
+            ws.onmessage = (event) => {
+                const message = JSON.parse(event.data);
+                console.log('Received:', message);
+
+                if (message.type === 'update_players') {
+                    updatePlayerStatus(message.players);
                 }
 
-                ws = new WebSocket(wsUrl + currentRoom);
-
-                ws.onopen = () => {
-                    console.log('Connected to room:', currentRoom);
-                };
-
-                ws.onmessage = (event) => {
-                    const message = JSON.parse(event.data);
-                    console.log('Received:', message);
-
-                    if (message.type === 'update_players') {
-                        updatePlayerStatus(message.players);
-                    }
-
-                    if (message.type === 'game_started') {
-                        // Redirect to the game page for both clients
-                        window.location.href = '/static/game.html?room=' + currentRoom;
-                    }
-                };
-          }
+                if (message.type === 'game_started') {
+                    // Redirect to the game page for both clients
+                    window.location.href = '/static/game.html?room=' + currentRoom;
+                }
+            };
+        }
 
         function sendPlayerStatus(player, isReady) {
             if (ws) {
@@ -129,6 +131,14 @@
 
         function showError(message) {
             document.getElementById('error-message').innerText = message;
+        }
+
+        function identifyPlayer() {
+            if (ws) {
+                ws.send(JSON.stringify({
+                    type: 'identify_player'
+                }));
+            }
         }
     </script>
 </body>
